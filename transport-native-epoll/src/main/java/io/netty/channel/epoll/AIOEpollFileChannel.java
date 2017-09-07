@@ -30,7 +30,6 @@ import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.unix.FileDescriptor;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
-import org.jctools.queues.SpscGrowableArrayQueue;
 
 
 public class AIOEpollFileChannel extends AsynchronousFileChannel {
@@ -39,7 +38,7 @@ public class AIOEpollFileChannel extends AsynchronousFileChannel {
     private final File fileObject;
     private final FileDescriptor file;
     private final FileDescriptor eventFd;
-    final EpollEventLoop epollEventLoop;
+    private final EpollEventLoop epollEventLoop;
     private final EventFileChannel nettyChannel;
     private final boolean isDirect;
 
@@ -70,6 +69,15 @@ public class AIOEpollFileChannel extends AsynchronousFileChannel {
         } else {
             epollEventLoop.submit(register);
         }
+    }
+
+    /**
+     * Called by {@link AIOContext} to verify it has received a file with the same context as itself.
+     *
+     * @param context - the context calling this method
+     */
+    void verify(AIOContext context) {
+        assert epollEventLoop.aioContext == context : "Wrong AIO context tried to access file channel";
     }
 
     public int getEventFd() {

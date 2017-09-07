@@ -144,23 +144,23 @@ public class LibAIOTest {
                     int idx = 0;
                     try {
                         final EpollEventLoop loop = loops[tid % 8];
+                        final int numIterations = 1024;
 
                         AsynchronousFileChannel fc = new AIOEpollFileChannel(file, loop, FileDescriptor.O_RDONLY |
                                                                              FileDescriptor.O_DIRECT);
                         List<ImmutablePair<ByteBuffer, Future<Integer>>> futures =
-                            new ArrayList<ImmutablePair<ByteBuffer, Future<Integer>>>();
+                            new ArrayList<ImmutablePair<ByteBuffer, Future<Integer>>>(numIterations);
 
-                        for (int i = 0; i < 1024; i++) {
+                        for (int i = 0; i < numIterations; i++) {
                             //System.err.println(loop.threadProperties().name());
                             ByteBuffer buf = allocateAlignedByteBuffer(LEN, 512);
 
-                            buf.clear();
                             futures.add(new ImmutablePair<ByteBuffer,
                                                          Future<Integer>>(buf, fc.read(buf,
                                                                                        value.length() * (i % 1024))));
                         }
 
-                        for (int i = 0; i < 1024; i++) {
+                        for (int i = 0; i < numIterations; i++) {
                             int len = futures.get(i).getRight().get();
                             ByteBuffer buf = futures.get(i).getLeft();
                             buf.flip();

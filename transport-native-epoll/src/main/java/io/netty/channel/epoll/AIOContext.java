@@ -34,7 +34,7 @@ public class AIOContext {
     private final long address;
     private long nextId;
     private long outstanding;
-    private long maxOutstanding;
+    private final long maxOutstanding;
     private final Map<Long, IORequest> outstandingRequests;
     private final ArrayDeque<IORequest> pendingRequests;
     private volatile boolean destroyed;
@@ -70,7 +70,8 @@ public class AIOContext {
         assert !destroyed;
         assert dst.isDirect();
         assert dst.position() == 0;
-        assert file.epollEventLoop.aioContext == this;
+
+        file.verify(this);
 
         int length = (dst.limit() & 511) == 0 ? dst.limit() : ((dst.limit() + 511) & ~511);
         if (dst.capacity() < length) {
@@ -88,7 +89,7 @@ public class AIOContext {
         IORequest<A> request = new IORequest<A>(file, dst, position, length, handler, attachment);
 
         try {
-            // Avoid sending overflowing the aio context queue (EGAIN)
+            // Avoid sending overflowing the aio context queue (EAGAIN)
             // instead buffer locally
             if (outstanding + 1 <= maxOutstanding) {
                 long id = Native.submitAIORead(this, file.getEventFd(), file.getFd(), position, length, dst);
@@ -117,7 +118,8 @@ public class AIOContext {
 
     public void processReady(AIOEpollFileChannel file) {
         assert !destroyed;
-        assert file.epollEventLoop.aioContext == this;
+        file.verify(this);
+
         IORequest request = null;
         try {
             long numReady = Native.eventFdRead(file.getEventFd());
@@ -156,7 +158,7 @@ public class AIOContext {
                 // Push any pending requests if we have room
                 try {
                     if (outstanding + 1 <= maxOutstanding && (req = pendingRequests.poll()) != null) {
-                        assert req.file.epollEventLoop.aioContext == this;
+                        req.file.verify(this);
                         long nextId = Native.submitAIORead(this, req.file.getEventFd(), req.file.getFd(),
                                                            req.position, req.length, req.buffer);
                         IORequest r = outstandingRequests.putIfAbsent(nextId, req);
