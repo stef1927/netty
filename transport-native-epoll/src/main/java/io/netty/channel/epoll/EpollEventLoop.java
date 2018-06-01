@@ -34,6 +34,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -41,12 +42,14 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import static java.lang.Math.min;
 
+import io.netty.util.internal.logging.InternalLogLevel;
+
 /**
  * {@link EventLoop} which uses epoll under the covers. Only works on Linux!
  */
-final class EpollEventLoop extends SingleThreadEventLoop {
+public class EpollEventLoop extends SingleThreadEventLoop {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(EpollEventLoop.class);
-    private static final AtomicIntegerFieldUpdater<EpollEventLoop> WAKEN_UP_UPDATER =
+    protected static final AtomicIntegerFieldUpdater<EpollEventLoop> WAKEN_UP_UPDATER =
             AtomicIntegerFieldUpdater.newUpdater(EpollEventLoop.class, "wakenUp");
 
     static {
@@ -55,15 +58,16 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         Epoll.ensureAvailability();
     }
 
-    private final FileDescriptor epollFd;
-    private final FileDescriptor eventFd;
+    protected final FileDescriptor epollFd;
+    protected final FileDescriptor eventFd;
     private final FileDescriptor timerFd;
+    protected final AIOContext aioContext;
     private final IntObjectMap<AbstractEpollChannel> channels = new IntObjectHashMap<AbstractEpollChannel>(4096);
-    private final boolean allowGrowing;
-    private final EpollEventArray events;
+    protected final boolean allowGrowing;
+    protected final EpollEventArray events;
     private final IovArray iovArray = new IovArray();
-    private final SelectStrategy selectStrategy;
-    private final IntSupplier selectNowSupplier = new IntSupplier() {
+    protected final SelectStrategy selectStrategy;
+    protected final IntSupplier selectNowSupplier = new IntSupplier() {
         @Override
         public int get() throws Exception {
             return epollWaitNow();
@@ -75,14 +79,19 @@ final class EpollEventLoop extends SingleThreadEventLoop {
             return EpollEventLoop.super.pendingTasks();
         }
     };
-    private volatile int wakenUp;
+    protected volatile int wakenUp;
     private volatile int ioRatio = 50;
 
     // See http://man7.org/linux/man-pages/man2/timerfd_create.2.html.
     private static final long MAX_SCHEDULED_TIMERFD_NS = 999999999;
 
-    EpollEventLoop(EventLoopGroup parent, Executor executor, int maxEvents,
-                   SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler) {
+    protected EpollEventLoop(EventLoopGroup parent, Executor executor, int maxEvents,
+                             SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler) {
+        this(parent, executor, maxEvents, strategy, rejectedExecutionHandler, null);
+    }
+
+    protected EpollEventLoop(EventLoopGroup parent, Executor executor, int maxEvents,
+                   SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler, AIOContext.Config aio) {
         super(parent, executor, false, DEFAULT_MAX_PENDING_TASKS, rejectedExecutionHandler);
         selectStrategy = ObjectUtil.checkNotNull(strategy, "strategy");
         if (maxEvents == 0) {
@@ -96,9 +105,24 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         FileDescriptor epollFd = null;
         FileDescriptor eventFd = null;
         FileDescriptor timerFd = null;
+        AIOContext aioContext = null;
+        this.epollFd = epollFd = Native.newEpollCreate();
+        this.eventFd = eventFd = Native.newEventFd();
+
+        if (aio != null && Aio.isAvailable()) {
+            try {
+                aioContext = Native.createAIOContext(aio);
+                Native.epollCtlAdd(epollFd.intValue(),
+                                   aioContext.getEventFd().intValue(),
+                                   Native.EPOLLIN | Native.EFDNONBLOCK | Native.EPOLLET);
+                logger.info("Created AIO Context with params: {}", aio);
+            } catch (Throwable e) {
+                logger.error("Unable to initialize AIO", e);
+            }
+        }
+        this.aioContext = aioContext;
+
         try {
-            this.epollFd = epollFd = Native.newEpollCreate();
-            this.eventFd = eventFd = Native.newEventFd();
             try {
                 Native.epollCtlAdd(epollFd.intValue(), eventFd.intValue(), Native.EPOLLIN);
             } catch (IOException e) {
@@ -134,6 +158,20 @@ final class EpollEventLoop extends SingleThreadEventLoop {
                         // ignore
                     }
                 }
+                if (timerFd != null) {
+                    try {
+                        timerFd.close();
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                }
+                if (aioContext != null) {
+                    try {
+                        aioContext.destroy();
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                }
             }
         }
     }
@@ -144,6 +182,30 @@ final class EpollEventLoop extends SingleThreadEventLoop {
     IovArray cleanArray() {
         iovArray.clear();
         return iovArray;
+    }
+
+    public FileDescriptor epollFd() {
+        return epollFd;
+    }
+
+    /**
+     * @return the aio context, may be null if AIO is not available
+     */
+    public AIOContext aioContext() {
+        return aioContext;
+    }
+
+    /**
+     * count the number of items in a iterator
+     */
+    private static int iteratorSize(Iterator it) {
+        int i = 0;
+        while (it.hasNext()) {
+            it.next();
+            ++i;
+        }
+
+        return i;
     }
 
     @Override
@@ -224,7 +286,7 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         this.ioRatio = ioRatio;
     }
 
-    private int epollWait(boolean oldWakeup) throws IOException {
+    protected int epollWait(boolean oldWakeup) throws IOException {
         // If a task was submitted when wakenUp value was 1, the task didn't get a chance to produce wakeup event.
         // So we need to check task queue again before calling epoll_wait. If we don't, the task might be pended
         // until epoll_wait was timed out. It might be pended until idle timeout if IdleStateHandler existed
@@ -345,7 +407,7 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         }
     }
 
-    private void closeAll() {
+    protected void closeAll() {
         try {
             epollWaitNow();
         } catch (IOException ignore) {
@@ -364,7 +426,7 @@ final class EpollEventLoop extends SingleThreadEventLoop {
         }
     }
 
-    private void processReady(EpollEventArray events, int ready) {
+    protected void processReady(EpollEventArray events, int ready) {
         for (int i = 0; i < ready; i ++) {
             final int fd = events.fd(i);
             if (fd == eventFd.intValue()) {
@@ -373,6 +435,10 @@ final class EpollEventLoop extends SingleThreadEventLoop {
             } else if (fd == timerFd.intValue()) {
                 // consume wakeup event, necessary because the timer is added with ET mode.
                 Native.timerFdRead(fd);
+            } else if (aioContext != null && fd == aioContext.getEventFd().intValue()) {
+                // consume aio event
+                Native.eventFdRead(fd);
+                aioContext.processReady();
             } else {
                 final long ev = events.events(i);
 
@@ -450,6 +516,25 @@ final class EpollEventLoop extends SingleThreadEventLoop {
             // release native memory
             iovArray.release();
             events.free();
+            if (aioContext != null) {
+                aioContext.destroy();
+            }
+        }
+    }
+
+    public void toLogAsync(final InternalLogLevel level) {
+        Runnable log = new Runnable() {
+            @Override
+            public void run() {
+                logger.log(level,
+                           String.format("EpollEventLoop[epollfd: %s, eventfd: %s, timerfd: %s, aio: %s]",
+                                         epollFd, eventFd, timerFd, aioContext.toString()));
+            }
+        };
+        if (inEventLoop()) {
+            log.run();
+        } else {
+            submit(log);
         }
     }
 }

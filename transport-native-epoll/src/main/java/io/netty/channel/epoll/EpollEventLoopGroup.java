@@ -52,6 +52,11 @@ public final class EpollEventLoopGroup extends MultithreadEventLoopGroup {
         this(nThreads, (ThreadFactory) null);
     }
 
+    public EpollEventLoopGroup(int nThreads, AIOContext.Config aio) {
+        super(nThreads, (ThreadFactory) null, 0, DefaultSelectStrategyFactory.INSTANCE,
+              RejectedExecutionHandlers.reject(), aio);
+    }
+
     /**
      * Create a new instance using the specified number of threads and the default {@link ThreadFactory}.
      */
@@ -131,7 +136,8 @@ public final class EpollEventLoopGroup extends MultithreadEventLoopGroup {
 
     @Override
     protected EventLoop newChild(Executor executor, Object... args) throws Exception {
+        AIOContext.Config aio = args.length == 3 ? null : (AIOContext.Config) args[3];
         return new EpollEventLoop(this, executor, (Integer) args[0],
-                ((SelectStrategyFactory) args[1]).newSelectStrategy(), (RejectedExecutionHandler) args[2]);
+                ((SelectStrategyFactory) args[1]).newSelectStrategy(), (RejectedExecutionHandler) args[2], aio);
     }
 }

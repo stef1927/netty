@@ -392,6 +392,10 @@ public final class PlatformDependent {
         return PlatformDependent0.directBufferAddress(buffer);
     }
 
+    public static ByteBuffer attachment(ByteBuffer buffer) {
+        return PlatformDependent0.attachment(buffer);
+    }
+
     public static ByteBuffer directBuffer(long memoryAddress, int size) {
         if (PlatformDependent0.hasDirectBufferNoCleanerConstructor()) {
             return PlatformDependent0.newDirectBuffer(memoryAddress, size);

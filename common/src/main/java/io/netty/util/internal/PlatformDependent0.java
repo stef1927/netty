@@ -18,6 +18,7 @@ package io.netty.util.internal;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import sun.misc.Unsafe;
+import sun.nio.ch.DirectBuffer;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -463,6 +464,14 @@ final class PlatformDependent0 {
 
     static long directBufferAddress(ByteBuffer buffer) {
         return getLong(buffer, ADDRESS_FIELD_OFFSET);
+    }
+
+    static ByteBuffer attachment(ByteBuffer buffer) {
+        if (buffer instanceof DirectBuffer) {
+            return (ByteBuffer) (((DirectBuffer) buffer).attachment());
+        }
+
+        return null;
     }
 
     static long byteArrayBaseOffset() {
