@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -40,7 +41,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.netty.util.SuppressForbidden;
-import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -53,6 +53,34 @@ import sun.nio.ch.DirectBuffer;
 
 
 public class LibAIOTest {
+
+    class Pair<L, R> {
+        final L left;
+        final R right;
+
+        Pair(L left, R right) {
+            this.left = left;
+            this.right = right;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Pair<?, ?> pair = (Pair<?, ?>) o;
+            return left.equals(pair.left) &&
+                    right.equals(pair.right);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(left, right);
+        }
+    }
 
     private static Random random = new Random();
     private static final int SECTOR_SIZE = 512;
@@ -292,15 +320,15 @@ public class LibAIOTest {
                             for (ByteBuffer buffer : buffers) {
                                 final CompletableFuture fut = new CompletableFuture();
                                 futures.add(fut);
-                                batch.add(offset, buffer, Pair.of(offset, buffer),
+                                batch.add(offset, buffer, new Pair(offset, buffer),
                                         new CompletionHandler<Integer, Pair<Long, ByteBuffer>>() {
 
                                     @Override
                                     public void completed(Integer read, Pair<Long, ByteBuffer> attachment) {
 
                                         try {
-                                            long pos = attachment.getLeft();
-                                            ByteBuffer buffer = attachment.getRight();
+                                            long pos = attachment.left;
+                                            ByteBuffer buffer = attachment.right;
                                             buffer.flip();
                                             checkContent(fileReader, buffer, pos, buffer.limit());
                                             freeAlignedByteBuffer(buffer);
@@ -403,13 +431,13 @@ public class LibAIOTest {
 
         AIOContext.Batch<Pair<Long, ByteBuffer>> batch = fc.newBatch();
         for (ByteBuffer buffer : buffers) {
-            batch.add(offset, buffer, Pair.of(offset, buffer),
+            batch.add(offset, buffer, new Pair(offset, buffer),
                     new CompletionHandler<Integer, Pair<Long, ByteBuffer>>() {
                 @Override
                 public void completed(Integer read, Pair<Long, ByteBuffer> attachment) {
                     try {
-                        long pos = attachment.getLeft();
-                        ByteBuffer buff = attachment.getRight();
+                        long pos = attachment.left;
+                        ByteBuffer buff = attachment.right;
                         buff.flip();
                         checkContent(fileReader, buff, pos, buff.limit());
                         latch.countDown();
