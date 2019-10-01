@@ -33,7 +33,7 @@ public class HpackEncoderTest {
     @Before
     public void setUp() {
         hpackEncoder = new HpackEncoder();
-        hpackDecoder = new HpackDecoder(DEFAULT_HEADER_LIST_SIZE, 32);
+        hpackDecoder = new HpackDecoder(DEFAULT_HEADER_LIST_SIZE);
         mockHeaders = mock(Http2Headers.class);
     }
 
@@ -74,7 +74,7 @@ public class HpackEncoderTest {
 
         try {
             hpackEncoder.encodeHeaders(0, buf, headersIn, Http2HeadersEncoder.NEVER_SENSITIVE);
-            hpackDecoder.setMaxHeaderListSize(bigHeaderSize + 1024, bigHeaderSize + 1024);
+            hpackDecoder.setMaxHeaderListSize(bigHeaderSize + 1024);
             hpackDecoder.decode(0, buf, headersOut, false);
         } finally {
             buf.release();
